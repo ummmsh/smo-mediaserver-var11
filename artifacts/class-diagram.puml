@@ -1,0 +1,199 @@
+@startuml
+title Диаграмма классов
+skinparam classAttributeIconSize 0
+hide empty members
+
+enum EventType {
+  GENERATE
+  END_SERVICE
+}
+class Event {
+  - time: double
+  - type: EventType
+  - source: Source
+  - device: Device
+  + getTime(): double
+  + getType(): EventType
+  + getSource(): Source
+  + getDevice(): Device
+}
+class EventCalendar {
+  - events: PriorityQueue<Event>
+  - currentTime: double
+  + schedule(event: Event)
+  + next(): Event
+  + isEmpty(): boolean
+  + getCurrentTime(): double
+  + snapshot(): List<Event>
+}
+enum PutStatus {
+  STORED
+  EVICTED
+}
+class PutResult {
+  - status: PutStatus
+  - cellIndex: int
+  - evicted: Request
+  + getStatus(): PutStatus
+  + getCellIndex(): int
+  + getEvicted(): Request
+}
+class Request {
+  - sourceId: int
+  - frameNo: int
+  - arrivalTime: double
+  - serviceStartTime: double
+  - serviceEndTime: double
+  - deviceId: int
+  + getSourceId(): int
+  + getFrameNo(): int
+  + getArrivalTime(): double
+  + getServiceStartTime(): double
+  + getServiceEndTime(): double
+  + setServiceStart(t: double, deviceId: int)
+  + setServiceEnd(t: double)
+}
+interface RandomLaw {
+  + next(): double
+}
+class ExponentialLaw {
+  - lambda: double
+  + next(): double
+}
+class UniformLaw {
+  - a: double
+  - b: double
+  + next(): double
+}
+
+class Source {
+  - id: int
+  - frameCounter: int
+  - law: RandomLaw
+  - calendar: EventCalendar
+  - dispatcher: PlacementDispatcher
+  - statistics: Statistics
+  + scheduleNext(t: double)
+  + onGenerate(t: double)
+  - generateRequest(t: double): Request
+}
+class PlacementDispatcher {
+  - buffer: Buffer
+  - selectionDispatcher: SelectionDispatcher
+  - statistics: Statistics
+  + put(request: Request)
+}
+class Buffer {
+  - cells: Request[]
+  + put(request: Request): PutResult
+  + takeLatest(): Request
+  + isEmpty(): boolean
+  + getCells(): Request[]
+  - findFirstFree(): int
+  - indexOfOldest(): int
+  - indexOfLatest(): int
+}
+class SelectionDispatcher {
+  - buffer: Buffer
+  - devices: Device[]
+  - statistics: Statistics
+  + onBufferChanged()
+  + onDeviceReleased(device: Device)
+  - findFreeDevice(): Device
+  - startFromBuffer(device: Device)
+}
+class Device {
+  - id: int
+  - current: Request
+  - busyTime: double
+  - law: RandomLaw
+  - calendar: EventCalendar
+  - dispatcher: SelectionDispatcher
+  - statistics: Statistics
+  + startService(request: Request, t: double)
+  + onServiceEnd(t: double)
+  + isBusy(): boolean
+  + getId(): int
+  + getCurrent(): Request
+  + getBusyTime(): double
+}
+class Statistics {
+  - generated: int[]
+  - rejected: int[]
+  - processed: int[]
+  - sumWait: double[]
+  - sumWait2: double[]
+  - sumService: double[]
+  - sumService2: double[]
+  - sumInSystem: double[]
+  - lastEvicted: Request
+  + registerGenerated(request: Request)
+  + registerRejected(request: Request)
+  + registerWaiting(request: Request, wait: double)
+  + registerProcessed(request: Request)
+  + getRejectRate(): double
+  + getLastEvicted(): Request
+  + buildSummaryTable(devices: Device[], T: double): SummaryTable
+}
+class SimulationController {
+  - calendar: EventCalendar
+  - sources: Source[]
+  - buffer: Buffer
+  - placement: PlacementDispatcher
+  - selection: SelectionDispatcher
+  - devices: Device[]
+  - statistics: Statistics
+  - maxRequests: int
+  + step(): SystemState
+  + runAuto(nRequests: int): SummaryTable
+  - dispatch(event: Event)
+  - buildState(event: Event): SystemState
+}
+class SystemState <<ОД2>> {
+  + time: double
+  + lastEvent: Event
+  + lastArrived: Request
+  + lastEvicted: Request
+  + bufferCells: Request[]
+  + devices: Request[]
+  + rejectRate: double
+  + calendar: List<Event>
+}
+class SummaryTable <<ОР1>> {
+  + perSource: generated, Pотк, Твс, Тож, Тобсл, Dож, Dобсл
+  + perDevice: Kисп
+}
+
+RandomLaw <|.. ExponentialLaw
+RandomLaw <|.. UniformLaw
+EventCalendar "1" o-- "0..*" Event
+Event --> EventType
+SimulationController *-- "1" EventCalendar
+SimulationController *-- "1..*" Source
+SimulationController *-- "1" Buffer
+SimulationController *-- "1" PlacementDispatcher
+SimulationController *-- "1" SelectionDispatcher
+SimulationController *-- "1..*" Device
+SimulationController *-- "1" Statistics
+SimulationController ..> SystemState : creates
+Source --> EventCalendar
+Source --> RandomLaw
+Source --> PlacementDispatcher
+Source --> Statistics
+Source ..> Request : creates
+PlacementDispatcher --> Buffer
+PlacementDispatcher --> SelectionDispatcher
+PlacementDispatcher --> Statistics
+Buffer "1" o-- "0..B" Request
+Buffer ..> PutResult : returns
+PutResult --> PutStatus
+SelectionDispatcher --> Buffer
+SelectionDispatcher "1" --> "1..N" Device
+SelectionDispatcher --> Statistics
+Device --> SelectionDispatcher : onDeviceReleased
+Device --> EventCalendar
+Device --> RandomLaw
+Device --> Statistics
+Device "1" o-- "0..1" Request
+Statistics ..> SummaryTable : builds
+@enduml

@@ -1,0 +1,13 @@
+@startuml
+title Завершение обслуживания кадра
+|Календарь событий|
+start
+:Событие END_SERVICE(t, прибор i);
+|Прибор|
+:onServiceEnd(t): setServiceEnd(t),\nbusyTime += t − serviceStartTime,\ncurrent = null;
+|Статистика|
+:registerProcessed: processed[k]++,\nТобсл = end − start, Твс = end − arrivalTime;
+|Диспетчер выбора|
+:onDeviceReleased(device) — триггер\nвыбора из буфера;
+stop
+@enduml

@@ -1,0 +1,111 @@
+@startuml
+title Медиасервер видеоконференций: HappyFlow, переполнение буфера, освобождение узла
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+
+control "Контроллер\nмоделирования" as Ctrl
+collections "Календарь\nсобытий" as Cal
+participant "Источник[k]\n(участник)" as Src
+control "Диспетчер\nпостановки" as DP
+queue "Буфер" as Buf
+control "Диспетчер\nвыбора" as DV
+participant "Прибор[i]\n(узел)" as Dev
+database "Статистика" as St
+
+note over Src: ИБ — бесконечный источник\nИЗ1 — пуассоновский поток кадров:\nинтервал Δt ~ Exp(λk)
+note over Ctrl: Триггер любого действия — ближайшее\nсобытие календаря (GENERATE / END_SERVICE).\nВ пошаговом режиме после каждого события\nстроится SystemState (ОД2).
+
+== 1. HappyFlow: буфер свободен, прибор 1 свободен ==
+Ctrl -> Cal: next()
+Cal --> Ctrl: Event(GENERATE, t, Источник k)
+Ctrl -> Src: onGenerate(t)
+Src -> Src: generateRequest(t): Request(k, n, t)
+Src -> St: registerGenerated(request)
+Src -> Cal: schedule(Event(GENERATE, t + Exp(λk), k))
+Src -> DP: put(request)
+DP -> Buf: put(request)
+note right of Buf: Д1ОЗ3 — первая от начала\nсвободная ячейка, без сдвига
+Buf --> DP: PutResult(STORED, cell)
+DP -> DV: onBufferChanged()
+loop i = 1..N, до первого свободного (Д2П1)
+  DV -> Dev: isBusy()
+  Dev --> DV: false (прибор 1 свободен)
+end
+note right of DV: Д2П1 — свободный прибор\nс наименьшим номером
+DV -> Buf: takeLatest()
+note right of Buf: Д2Б2 (LIFO) — кадр с max arrivalTime,\nячейка освобождается без сдвига
+Buf --> DV: request
+DV -> St: registerWaiting(request, t - arrivalTime)
+note right of St: в HappyFlow ожидание = 0
+DV -> Dev: startService(request, t)
+Dev -> Dev: request.setServiceStart(t, i)
+Dev -> Cal: schedule(Event(END_SERVICE, t + τ, Прибор[i]))
+note right of Dev: ПЗ2 - τ ~ U(a, b)
+Dev --> DV: ok
+DV --> DP: кадр поставлен на прибор
+DP --> Src: ok
+Src --> Ctrl: событие обработано
+
+== 2. Все приборы заняты, буфер заполняется ==
+loop пока все N приборов заняты и в буфере есть свободная ячейка
+  Ctrl -> Cal: next()
+  Cal --> Ctrl: Event(GENERATE, t, Источник k)
+  Ctrl -> Src: onGenerate(t)
+  ref over Src, St, Cal: generateRequest(t), registerGenerated, schedule следующего GENERATE — как в разделе 1
+  Src -> DP: put(request)
+  DP -> Buf: put(request)
+  Buf --> DP: PutResult(STORED, cell)
+  DP -> DV: onBufferChanged()
+  loop i = 1..N
+    DV -> Dev: isBusy()
+    Dev --> DV: true
+  end
+  DV --> DP: свободных приборов нет, кадр ждёт END_SERVICE
+  DP --> Src: ok
+  Src --> Ctrl: событие обработано
+end
+
+== 3. Буфер полон: выбивание самого старого кадра (отказ) ==
+Ctrl -> Cal: next()
+Cal --> Ctrl: Event(GENERATE, t, Источник k)
+Ctrl -> Src: onGenerate(t)
+ref over Src, St, Cal: generateRequest(t), registerGenerated, schedule следующего GENERATE
+Src -> DP: put(request)
+DP -> Buf: put(request)
+note right of Buf: Д1ОО3 — выбить кадр с min arrivalTime\n(самый старый), новый записать в его ячейку
+Buf --> DP: PutResult(EVICTED, cell, oldest)
+DP -> St: registerRejected(oldest)
+note right of St: отказ засчитывается\nисточнику выбитого кадра
+DP -> DV: onBufferChanged()
+loop i = 1..N
+  DV -> Dev: isBusy()
+  Dev --> DV: true
+end
+DV --> DP: свободных приборов нет
+DP --> Src: ok
+Src --> Ctrl: событие обработано
+
+== 4. Освобождение прибора и постановка одной заявки из буфера ==
+Ctrl -> Cal: next()
+Cal --> Ctrl: Event(END_SERVICE, t, Прибор i)
+Ctrl -> Dev: onServiceEnd(t)
+Dev -> Dev: request.setServiceEnd(t); busyTime += τ; current = null
+Dev -> St: registerProcessed(request)
+Dev -> DV: onDeviceReleased(this)
+DV -> Buf: isEmpty()
+alt буфер не пуст
+  Buf --> DV: false
+  DV -> Buf: takeLatest()
+  note right of Buf: Д2Б2 — самый свежий кадр
+  Buf --> DV: request
+  DV -> St: registerWaiting(request, t - arrivalTime)
+  DV -> Dev: startService(request, t)
+  Dev -> Cal: schedule(Event(END_SERVICE, t + τ, Прибор i))
+  Dev --> DV: ok
+else буфер пуст
+  Buf --> DV: true
+  note right of DV: прибор простаивает\nдо следующего onBufferChanged
+end
+DV --> Dev: выбор завершён
+Dev --> Ctrl: событие обработано
+@enduml

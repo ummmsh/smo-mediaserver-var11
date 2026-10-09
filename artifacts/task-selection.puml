@@ -1,0 +1,32 @@
+@startuml
+title Выбор заявки и постановка на прибор
+|Диспетчер выбора|
+start
+if (Триггер?) then (onBufferChanged)
+  :Перебрать приборы i = 1..N,\nвзять первый свободный (Д2П1);
+  if (Свободный прибор найден?) then (нет)
+    :Кадр остаётся в буфере\nдо onDeviceReleased;
+    stop
+  else (да)
+  endif
+else (onDeviceReleased(device))
+  :Прибор = освободившийся\n(других свободных нет при\nнепустом буфере, Д2П1);
+  |Буфер|
+  if (Буфер пуст?) then (да)
+    |Диспетчер выбора|
+    :Прибор простаивает\nдо следующего onBufferChanged;
+    stop
+  else (нет)
+  endif
+endif
+|Буфер|
+:takeLatest(): выдать кадр\nс max arrivalTime (Д2Б2);
+:Освободить ячейку без сдвига (Д1ОЗ3);
+|Статистика|
+:registerWaiting: Тож = t − arrivalTime;
+|Прибор|
+:startService(request, t):\ncurrent = request, setServiceStart(t, i);
+|Календарь событий|
+:Запланировать END_SERVICE(i)\nв момент t + τ, τ ~ U(a, b) (ПЗ2);
+stop
+@enduml
